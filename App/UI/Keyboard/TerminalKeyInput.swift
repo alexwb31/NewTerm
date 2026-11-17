@@ -64,7 +64,9 @@ class TerminalKeyInput: TextInputBase {
 	private var repeatTimer: Timer?
 
 	private var state = KeyboardToolbarViewState()
-	private var pressedHardwareKeys = Set<UIKey>()
+	// Only the most recently pressed hardware key repeats (like macOS). Tracked by keyCode, since the
+	// UIKey delivered on release can differ from the one on press (e.g. shift released first).
+	private var repeatingHardwareKey: UIKey?
 	private var pressedToolbarKeys = Set<ToolbarKey>()
 
 	override init(frame: CGRect) {
@@ -209,7 +211,11 @@ class TerminalKeyInput: TextInputBase {
 
 	@discardableResult
 	override func resignFirstResponder() -> Bool {
-		super.resignFirstResponder()
+		// We may never get pressesEnded for a key held while losing focus.
+		repeatingHardwareKey = nil
+		pressedToolbarKeys.removeAll()
+		stopKeyRepeatIfIdle()
+		return super.resignFirstResponder()
 	}
 
 	override var canBecomeFirstResponder: Bool { true }
@@ -315,30 +321,32 @@ class TerminalKeyInput: TextInputBase {
 	}
 
 	override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-		var isHandled = false
+		var handledKey: UIKey?
 		for press in presses {
 			if let key = press.key,
 				 handleKey(key) {
-				isHandled = true
-				pressedHardwareKeys.insert(key)
+				handledKey = key
 			}
 		}
 
-		if !pressedHardwareKeys.isEmpty {
-			beginKeyRepeat()
-		}
-
-		if !isHandled {
+		if let key = handledKey {
+			// Every new press restarts the repeat delay from zero, so a timer left over from an earlier
+			// key can never fire while this key is only briefly held.
+			repeatingHardwareKey = key
+			restartKeyRepeat()
+		} else {
 			super.pressesBegan(presses, with: event)
 		}
 	}
 
 	private func handlePressesEnded(_ presses: Set<UIPress>) {
 		for press in presses {
-			if let key = press.key {
-				pressedHardwareKeys.remove(key)
+			if let key = press.key,
+				 key.keyCode == repeatingHardwareKey?.keyCode {
+				repeatingHardwareKey = nil
 			}
 		}
+		stopKeyRepeatIfIdle()
 	}
 
 	override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
@@ -351,41 +359,48 @@ class TerminalKeyInput: TextInputBase {
 		super.pressesCancelled(presses, with: event)
 	}
 
-	private func beginKeyRepeat() {
-		if repeatTimer != nil {
+	private var hasRepeatingKeys: Bool {
+		repeatingHardwareKey != nil || !pressedToolbarKeys.isEmpty
+	}
+
+	/// Cancels any pending repeat and starts the initial delay again for the currently held key(s).
+	private func restartKeyRepeat() {
+		repeatTimer?.invalidate()
+		repeatTimer = nil
+
+		guard KeyboardPreferences.isKeyRepeatEnabled, hasRepeatingKeys else {
 			return
 		}
 
-		if KeyboardPreferences.isKeyRepeatEnabled {
-			repeatTimer = Timer.scheduledTimer(timeInterval: KeyboardPreferences.keyRepeatDelay,
-																				 target: self,
-																				 selector: #selector(self.handleKeyRepeat),
-																				 userInfo: true,
-																				 repeats: false)
+		repeatTimer = Timer.scheduledTimer(withTimeInterval: KeyboardPreferences.keyRepeatDelay, repeats: false) { [weak self] _ in
+			guard let self = self else { return }
+			self.fireKeyRepeat()
+			guard self.hasRepeatingKeys else { return }
+			self.repeatTimer = Timer.scheduledTimer(withTimeInterval: KeyboardPreferences.keyRepeat, repeats: true) { [weak self] _ in
+				self?.fireKeyRepeat()
+			}
 		}
 	}
 
-	@objc private func handleKeyRepeat(_ timer: Timer) {
-		for key in pressedHardwareKeys {
+	private func stopKeyRepeatIfIdle() {
+		if !hasRepeatingKeys {
+			repeatTimer?.invalidate()
+			repeatTimer = nil
+		}
+	}
+
+	private func fireKeyRepeat() {
+		guard hasRepeatingKeys else {
+			stopKeyRepeatIfIdle()
+			return
+		}
+
+		if let key = repeatingHardwareKey {
 			handleKey(key)
 		}
 
 		for key in pressedToolbarKeys {
 			keyboardToolbarDidPressKey(key)
-		}
-
-		if pressedHardwareKeys.isEmpty && pressedToolbarKeys.isEmpty {
-			repeatTimer?.invalidate()
-			repeatTimer = nil
-			return
-		}
-
-		if timer.userInfo as? Bool ?? false {
-			repeatTimer = Timer.scheduledTimer(timeInterval: KeyboardPreferences.keyRepeat,
-																				 target: self,
-																				 selector: #selector(self.handleKeyRepeat),
-																				 userInfo: nil,
-																				 repeats: true)
 		}
 	}
 
@@ -416,7 +431,7 @@ extension TerminalKeyInput: KeyboardToolbarViewDelegate {
 				 .home, .end, .pageUp, .pageDown,
 				 .delete:
 			pressedToolbarKeys.insert(key)
-			beginKeyRepeat()
+			restartKeyRepeat()
 
 		default: break
 		}
@@ -424,6 +439,7 @@ extension TerminalKeyInput: KeyboardToolbarViewDelegate {
 
 	func keyboardToolbarDidEndPressingKey(_ key: ToolbarKey) {
 		pressedToolbarKeys.remove(key)
+		stopKeyRepeatIfIdle()
 	}
 }
 
