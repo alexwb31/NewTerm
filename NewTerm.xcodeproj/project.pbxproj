@@ -1371,10 +1371,10 @@
 /* Begin XCRemoteSwiftPackageReference section */
 		4E4CB11D27E9B2DB001F07B6 /* XCRemoteSwiftPackageReference "SwiftUIX" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/SwiftUIX/SwiftUIX";
+			repositoryURL = "https://github.com/alexwb31/SwiftUIX";
 			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.1.2;
+				kind = revision;
+				revision = ad8f6de876c83ab4ba72efb7ace844012d18124d;
 			};
 		};
 		4E9FB96A26171A01005AFCC8 /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
