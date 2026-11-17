@@ -21,7 +21,7 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
     - name: Install build tools
-      run: brew install ldid xz make
+      run: brew install ldid xz make cmark
     - name: Set up Theos
       run: git clone --recursive --depth=1 'https://github.com/theos/theos.git' ~/theos
     - name: Compile
