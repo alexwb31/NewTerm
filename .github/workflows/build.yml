@@ -12,6 +12,11 @@ on:
       - '**/*.md'
       - 'assets/**'
   workflow_dispatch:
+    inputs:
+      debug:
+        description: 'Debug build (unstripped, for symbolicated crash logs)'
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -24,13 +29,18 @@ jobs:
       run: brew install ldid xz make cmark
     - name: Set up Theos
       run: git clone --recursive --depth=1 'https://github.com/theos/theos.git' ~/theos
+    - name: Show toolchain and resolved packages
+      run: |
+        xcodebuild -version
+        xcodebuild -resolvePackageDependencies -project NewTerm.xcodeproj -scheme 'NewTerm (iOS)' | grep -A5 'Resolved source packages'
     - name: Compile
       id: package_build
       run: |
-        gmake package THEOS=~/theos ROOTLESS=1 FINALPACKAGE=1
+        if [ "${{ inputs.debug }}" = "true" ]; then FINAL=0; else FINAL=1; fi
+        gmake package THEOS=~/theos ROOTLESS=1 FINALPACKAGE=$FINAL
         echo "package=$(cat .theos/last_package)" >> $GITHUB_OUTPUT
     - name: Upload a Build Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: NewTerm3-rootless
+        name: NewTerm3-rootless${{ inputs.debug && '-debug' || '' }}
         path: '${{ steps.package_build.outputs.package }}'
